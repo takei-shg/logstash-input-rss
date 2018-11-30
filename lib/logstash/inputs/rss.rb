@@ -4,6 +4,7 @@ require "logstash/namespace"
 require "socket" # for Socket.gethostname
 require "stud/interval"
 require "faraday"
+require "faraday_middleware"
 require "rss"
 
 # Run command line tools and capture the whole output as an event.
@@ -32,6 +33,12 @@ class LogStash::Inputs::Rss < LogStash::Inputs::Base
   end # def register
 
   public
+  def extract_host(url)
+   uri = URI.parse(url)
+   return "#{uri.scheme}://#{uri.host}"
+  end # def extract_domain
+
+  public
   def run(queue)
     @run_thread = Thread.current
     while !stop?
@@ -39,7 +46,13 @@ class LogStash::Inputs::Rss < LogStash::Inputs::Base
       @logger.info? && @logger.info("Polling RSS", :url => @url)
 
       # Pull down the RSS feed using FTW so we can make use of future cache functions
-      response = Faraday.get @url
+      host = extract_host(@url)
+      connection = Faraday.new host do |conn|
+        conn.use FaradayMiddleware::FollowRedirects
+        conn.adapter :net_http
+      end
+
+      response = connection.get(@url)
       handle_response(response, queue)
 
       duration = Time.now - start
